@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Car Accident Detection and Prediction</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+</head>
+<body>
+<main class="app">
+    <!-- Header -->
+    <div class="header">
+        <div class="header-badge"><h2>🚗 Car Accident Detection + Prediction</h2></div>
+        <p class="header-hint">Upload a video, choose a detection mode, and process it.</p>
+    </div>
+
+    <!-- <div class="header"><p>Upload a video, select a model, and play the processed result directly here.</p></div> -->
+
+    <!-- Upload + Controls -->
+    <div class="card">
+        <div class="upload-row">
+            <div class="upload-area" id="uploadArea">
+                <span class="upload-icon">📁</span>
+                <span class="upload-label" id="uploadLabel">Choose a video file...</span>
+                <input type="file" id="videoInput" accept="video/*">
+            </div>
+            <button class="upload-clear" id="clearFile" title="Clear">✕</button>
+        </div>
+
+        <div class="mode-row" id="modeSelector">
+            <button class="mode-btn active" data-mode="hybrid">
+                Hybrid
+            </button>
+            <button class="mode-btn" data-mode="cnn">
+                CNN
+            </button>
+            <button class="mode-btn" data-mode="yolo">
+                YOLO (for testing)
+            </button>
+        </div>
+
+        <div class="action-row">
+            <button class="btn btn-process" id="processBtn" disabled>▶ Process Video</button>
+            <button class="btn btn-stop" id="stopBtn" disabled>⏹ Stop</button>
+        </div>
+    </div>
+
+    <!-- Status -->
+    <div id="statusStrip" class="status-strip"></div>
+
+    <!-- State Hero -->
+    <div class="state-hero normal" id="stateHero">
+        <div class="state-label" id="stateLabel">System Status</div>
+        <div class="state-value" id="stateValue">Normal</div>
+        <div class="state-sub" id="stateSub">No accident detected</div>
+    </div>
+
+    <!-- Metrics -->
+    <div class="metrics-grid">
+        <div class="metric-tile">
+            <div class="m-label">Frame</div>
+            <div class="m-value" id="metricFrame">0</div>
+        </div>
+        <div class="metric-tile">
+            <div class="m-label">Vehicles</div>
+            <div class="m-value" id="metricVehicles">0</div>
+        </div>
+        <div class="metric-tile">
+            <div class="m-label">Risks</div>
+            <div class="m-value" id="metricPredictionPairs">0</div>
+        </div>
+        <div class="metric-tile">
+            <div class="m-label">CNN Score</div>
+            <div class="m-value" id="metricCnn">-</div>
+        </div>
+        <div class="metric-tile">
+            <div class="m-label">YOLO Score</div>
+            <div class="m-value" id="metricYolo">-</div>
+        </div>
+        <div class="metric-tile accent">
+            <div class="m-label">Accident</div>
+            <div class="m-value" id="metricAccident">No</div>
+        </div>
+    </div>
+
+    <!-- Video -->
+    <div class="video-section" id="videoSection">
+        <div class="card" style="padding: 12px;">
+            <div class="video-wrapper">
+                <video id="outputVideo" controls preload="metadata"></video>
+            </div>
+            <div class="video-links">
+                <a id="openLink" href="#" target="_blank" rel="noopener noreferrer" class="vid-link">🔗 Open in New Tab</a>
+                <a id="downloadLink" href="#" download class="vid-link">⬇ Download Video</a>
+            </div>
+        </div>
+    </div>
+</main>
+
+<script>
+    const videoInput = document.getElementById("videoInput");
+    const uploadArea = document.getElementById("uploadArea");
+    const uploadLabel = document.getElementById("uploadLabel");
+    const clearFile = document.getElementById("clearFile");
+    const processBtn = document.getElementById("processBtn");
+    const stopBtn = document.getElementById("stopBtn");
+    const statusStrip = document.getElementById("statusStrip");
+    const stateHero = document.getElementById("stateHero");
+    const stateLabel = document.getElementById("stateLabel");
+    const stateValue = document.getElementById("stateValue");
+    const stateSub = document.getElementById("stateSub");
+    const videoSection = document.getElementById("videoSection");
+    const outputVideo = document.getElementById("outputVideo");
+    const openLink = document.getElementById("openLink");
+    const downloadLink = document.getElementById("downloadLink");
+    const modeSelector = document.getElementById("modeSelector");
+
+    const metricFrame = document.getElementById("metricFrame");
+    const metricCnn = document.getElementById("metricCnn");
+    const metricYolo = document.getElementById("metricYolo");
+    const metricVehicles = document.getElementById("metricVehicles");
+    const metricPredictionPairs = document.getElementById("metricPredictionPairs");
+    const metricAccident = document.getElementById("metricAccident");
+
+    let selectedMode = "hybrid";
+    let metricsPollTimer = null;
+    let metricsTimeline = [];
+    let currentJobId = "";
+    let selectedFile = null;
+
+    // File handling
+    videoInput.addEventListener("change", () => {
+        if (videoInput.files.length) {
+            selectedFile = videoInput.files[0];
+            uploadLabel.textContent = selectedFile.name;
+            uploadLabel.classList.add("has-file");
+            clearFile.classList.add("visible");
+            processBtn.disabled = false;
+        }
+    });
+
+    clearFile.addEventListener("click", () => {
+        videoInput.value = "";
+        selectedFile = null;
+        uploadLabel.textContent = "Choose a video file...";
+        uploadLabel.classList.remove("has-file");
+        clearFile.classList.remove("visible");
+        processBtn.disabled = true;
+    });
+
+    // Drag and drop
+    uploadArea.addEventListener("dragover", (e) => { e.preventDefault(); uploadArea.style.borderColor = "#3b82f6"; });
+    uploadArea.addEventListener("dragleave", () => { uploadArea.style.borderColor = ""; });
+    uploadArea.addEventListener("drop", (e) => {
+        e.preventDefault();
+        uploadArea.style.borderColor = "";
+        const files = e.dataTransfer.files;
+        if (files.length) {
+            selectedFile = files[0];
+            uploadLabel.textContent = selectedFile.name;
+            uploadLabel.classList.add("has-file");
+            clearFile.classList.add("visible");
+            processBtn.disabled = false;
+        }
+    });
+
+    // Mode
+    modeSelector.addEventListener("click", (e) => {
+        const btn = e.target.closest(".mode-btn");
+        if (!btn || btn.disabled) return;
+        modeSelector.querySelectorAll(".mode-btn").forEach(b => b.classList.remove("active"));
+        btn.classList.add("active");
+        selectedMode = btn.dataset.mode;
+    });
+
+    // Status
+    function showStatus(msg, type = "processing") {
+        statusStrip.className = `status-strip visible ${type}`;
+        statusStrip.innerHTML = type === "processing"
+            ? `<span class="spinner-ring"></span>${msg}`
+            : msg;
+    }
+    function hideStatus() { statusStrip.classList.remove("visible"); }
+
+    // Busy state
+    function setBusy(busy) {
+        processBtn.disabled = busy || !selectedFile;
+        stopBtn.disabled = !busy || !currentJobId;
+        videoInput.disabled = busy;
+        clearFile.disabled = busy;
+        modeSelector.querySelectorAll(".mode-btn").forEach(b => b.disabled = busy);
+    }
+
+    // Video
+    function resetVideo() {
+        outputVideo.pause();
+        outputVideo.removeAttribute("src");
+        outputVideo.load();
+        videoSection.classList.remove("visible");
+        openLink.href = "#";
+        downloadLink.href = "#";
+    }
+
+    // Polling
+    function stopPolling() {
+        if (metricsPollTimer) { clearInterval(metricsPollTimer); metricsPollTimer = null; }
+    }
+
+    async function cancelJob() {
+        if (!currentJobId) return;
+        stopBtn.disabled = true;
+        showStatus("Stopping...", "processing");
+        try {
+            const r = await fetch(`/jobs/${currentJobId}/cancel`, { method: "POST" });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok) throw new Error(d.error || "Failed to stop.");
+        } catch (e) {
+            showStatus(e.message, "error");
+            stopBtn.disabled = false;
+        }
+    }
+
+    function findTimelineSnapshot(t) {
+        if (!metricsTimeline.length) return null;
+        let best = 0;
+        for (let i = 0; i < metricsTimeline.length; i++) {
+            if ((metricsTimeline[i].time_sec ?? 0) <= t) best = i;
+            else break;
+        }
+        return metricsTimeline[best];
+    }
+
+    async function loadTimeline(jobId) {
+        try {
+            const r = await fetch(`/timeline/${jobId}`);
+            const d = await r.json().catch(() => ({}));
+            if (r.ok) metricsTimeline = Array.isArray(d.timeline) ? d.timeline : [];
+        } catch (_) { metricsTimeline = []; }
+    }
+
+    function fmt(v, d = 2) {
+        if (v === null || v === undefined) return "-";
+        const n = Number(v);
+        return Number.isNaN(n) ? "-" : Number.isInteger(n) ? String(n) : n.toFixed(d);
+    }
+
+    function updateStateHero(state) {
+        const s = (state || "normal").toLowerCase();
+        const config = {
+            normal:   { cls: "normal",   label: "System Status",   value: "Normal",              sub: "No accident detected" },
+            warning:  { cls: "warning",  label: "⚠ Warning",       value: "Potential Risk",      sub: "Trajectory analysis flagged a possible collision" },
+            accident: { cls: "accident", label: "🚨 Alert",        value: "Accident Detected",   sub: "Collision confirmed by detection system" }
+        };
+        const c = config[s] || config.normal;
+        stateHero.className = `state-hero ${c.cls}`;
+        stateLabel.textContent = c.label;
+        stateValue.textContent = c.value;
+        stateSub.textContent = c.sub;
+    }
+
+    function updateMetrics(m) {
+        updateStateHero(m.state);
+        metricFrame.textContent = String(m.frame ?? 0);
+        metricCnn.textContent = fmt(m.cnn_score, 3);
+        metricYolo.textContent = fmt(m.yolo_score, 3);
+        metricVehicles.textContent = String(m.vehicles ?? 0);
+        metricPredictionPairs.textContent = String(m.prediction_pairs ?? 0);
+        metricAccident.textContent = m.accident_detected ? "YES" : "No";
+    }
+
+    async function pollJob(jobId) {
+        try {
+            const [mR, jR] = await Promise.all([
+                fetch(`/metrics/${jobId}`),
+                fetch(`/jobs/${jobId}`)
+            ]);
+            const mD = await mR.json().catch(() => ({}));
+            const jD = await jR.json().catch(() => ({}));
+
+            if (mR.ok && mD.metrics) updateMetrics(mD.metrics);
+            if (!jR.ok) throw new Error(jD.error || "Job fetch failed.");
+
+            if (jD.status === "error" || jD.status === "cancelled") {
+                stopPolling();
+                currentJobId = "";
+                showStatus(
+                    jD.status === "cancelled" ? "Processing stopped." : (jD.error || "Processing failed."),
+                    jD.status === "cancelled" ? "success" : "error"
+                );
+                setBusy(false);
+                return;
+            }
+
+            if (jD.status === "done" && jD.output_url) {
+                stopPolling();
+                await loadTimeline(jobId);
+                const url = `${jD.output_url}?t=${Date.now()}`;
+                outputVideo.src = url;
+                outputVideo.load();
+                openLink.href = url;
+                downloadLink.href = url;
+                videoSection.classList.add("visible");
+                showStatus("✅ Processing complete!", "success");
+                currentJobId = "";
+                setBusy(false);
+            }
+        } catch (e) {
+            stopPolling();
+            currentJobId = "";
+            showStatus(e.message || "Unexpected error.", "error");
+            setBusy(false);
+        }
+    }
+
+    async function processVideo() {
+        if (!selectedFile) {
+            showStatus("Please select a video file first.", "error");
+            return;
+        }
+
+        resetVideo();
+        stopPolling();
+        metricsTimeline = [];
+        updateMetrics({
+            frame: 0, state: "normal", cnn_score: null,
+            yolo_score: null, vehicles: 0, prediction_pairs: 0, accident_detected: false
+        });
+        setBusy(true);
+        showStatus("Processing video...", "processing");
+
+        const fd = new FormData();
+        fd.append("video", selectedFile);
+        fd.append("mode", selectedMode);
+
+        try {
+            const r = await fetch("/process", { method: "POST", body: fd });
+            const d = await r.json().catch(() => ({}));
+            if (!r.ok || !d.job_id) throw new Error(d.error || "Processing failed.");
+            currentJobId = d.job_id;
+            stopBtn.disabled = false;
+            pollJob(d.job_id);
+            metricsPollTimer = setInterval(() => pollJob(d.job_id), 700);
+        } catch (e) {
+            currentJobId = "";
+            showStatus(e.message || "Unexpected error.", "error");
+            stopPolling();
+            setBusy(false);
+        }
+    }
+
+    processBtn.addEventListener("click", processVideo);
+    stopBtn.addEventListener("click", cancelJob);
+
+    outputVideo.addEventListener("error", () => {
+        showStatus("Browser can't decode this codec — use Open in Tab or Download.", "error");
+    });
+
+    outputVideo.addEventListener("loadedmetadata", () => {
+        if (metricsTimeline.length) updateMetrics(metricsTimeline[0]);
+    });
+
+    outputVideo.addEventListener("timeupdate", () => {
+        const snap = findTimelineSnapshot(outputVideo.currentTime);
+        if (snap) updateMetrics(snap);
+    });
+
+    outputVideo.addEventListener("seeked", () => {
+        const snap = findTimelineSnapshot(outputVideo.currentTime);
+        if (snap) updateMetrics(snap);
+    });
+</script>
+</body>
+</html>
